@@ -1,9 +1,10 @@
 #!/usr/bin/env python
 """
 Kamikaze!
+
 Usage:
-    kamikaze.py list (path|headers) [--multidir] [--ignore=STATUS_CODE]... WORDLIST TARGET ...
-    kamikaze.py brute (path|headers) [--charset=STRING] [--min_len=INT] [--max_len=INT] [--multidir] [--ignore=STATUS_CODE]... TARGET ...
+    kamikaze.py list (path|headers) [--procs=INT] [--multidir] [--ignore=STATUS_CODE]... WORDLIST TARGET ...
+    kamikaze.py brute (path|headers) [--procs=INT] [--charset=STRING] [--min_len=INT] [--max_len=INT] [--multidir] [--ignore=STATUS_CODE]... TARGET ...
 
 Options:
     list                     Search with a wordlist
@@ -13,6 +14,7 @@ Options:
         --max_len=INT        Specify the minimum length of a generated word [default: 1]
     path                     Send strings to the URL
     headers                  Send strings to each of the header fields
+    --procs=INT              Number of worker processes to spawn [default: 10]
     --multidir               Go multiple directories deep
     --ignore=STATUS_CODE     Status codes to ignore
 """
@@ -67,7 +69,8 @@ def read_wordlist(wordlist):
     if os.path.isfile(wordlist):
         with open(wordlist, 'r') as f:
             for line in f:
-                contents.append(line.strip())
+                if line.strip():
+                    contents.append(line.strip())
     else:
         write("Couldn't find wordlist", error=True)
     return contents
@@ -130,7 +133,7 @@ def url_get(url, ignore=[]):
         sys.exit()
 
 
-def path_search(targets, wordlist=None, multidir=False, ignore=None):
+def path_search(targets, wordlist=None, multidir=False, ignore=None, procs=80):
     global total
     if not wordlist:
         write('Must include wordlist', error=True)
@@ -150,7 +153,7 @@ def path_search(targets, wordlist=None, multidir=False, ignore=None):
                     urls.append(url)
 
         total = len(urls)
-        p = Pool(processes=200, initializer=init_worker)
+        p = Pool(processes=procs, initializer=init_worker)
         mfunc = partial(url_get, ignore=ignore)
         try:
             p.map_async(mfunc, urls).get(9999)
@@ -171,6 +174,7 @@ def main(args):
     multidir = False
     targets = []
     ignore = [404]
+    procs = 80
 
     if args['list']:
         wordlist = read_wordlist(args['WORDLIST'])
@@ -192,6 +196,9 @@ def main(args):
     else:
         write('Must choose either wordlist or brute force mode', error=True)
 
+    if args['--procs']:
+        procs = int(args['--procs'])
+
     if args['--multidir']:
         multidir = True
 
@@ -206,7 +213,8 @@ def main(args):
     if args['path']:
         kwds = {'wordlist': wordlist,
                 'multidir': multidir,
-                'ignore': ignore}
+                'ignore': ignore,
+                'procs': procs}
         path_search(targets, **kwds)
 
     elif args['headers']:
