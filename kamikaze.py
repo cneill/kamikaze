@@ -19,29 +19,65 @@ Options:
 from docopt import docopt
 import requests
 
+import sys
 import string
 import os.path
 import itertools
-from multiprocessing import Pool
+import signal
+from multiprocessing import Pool, Value
 from functools import partial
 
 
+counter = Value('i', 0)
+total = Value('i', 0)
+
+
+def init_worker():
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+
+# Handle output to the console
+def write(string, complete=False, sub=0, sep=False, raw=False,
+          verbosity=True, error=False):
+    status = '-'
+    if complete:
+        status = '+'
+    if error:
+        status = '!'
+
+    # print substatements only if verbosity > 0
+    if verbosity:
+        if raw:
+            sys.stdout.write(string)
+        elif sub:
+            sys.stdout.write(' [{0}]{1}=> {2}\n'.format(status, ('  ' * sub),
+                             string))
+        elif sep:
+            sys.stdout.write('=' * 80)
+
+    if not sep and not sub and not raw:
+        sys.stdout.write(' [' + status + '] ' + string + '\n')
+
+    sys.stdout.flush()
+
+
 def read_wordlist(wordlist):
+    write('Reading attack wordlist...')
     contents = []
     if os.path.isfile(wordlist):
         with open(wordlist, 'r') as f:
             for line in f:
                 contents.append(line.strip())
     else:
-        print "Couldn't find wordlist"
+        write("Couldn't find wordlist", error=True)
     return contents
 
 
 def generate_wordlist(charset=string.ascii_lowercase, min_length=1,
                       max_length=6):
-    print 'Generating attack wordlist...'
+    write('Generating attack wordlist...')
     if type(charset) is not str:
-        print 'invalid charset'
+        write('Invalid charset', error=True)
 
     wordlist = []
 
@@ -67,33 +103,53 @@ def process_targets(targets):
 
 
 def url_get(url, ignore=[]):
-    path = '/' + '/'.join(url.split('/')[1:])
+    global counter, total
+    progress = float(counter.value) / total
+    status = " [-] Processed {0}/{1} requests [{2:.2%}]".format(counter.value,
+                                                                total,
+                                                                progress)
+    status += (chr(8) * (len(status) + 1))
+
+    write(status, raw=True, sub=True)
+
+    path = '/'.join(url.split('/')[2:])
     try:
         resp = requests.get(url)
+        with counter.get_lock():
+            counter.value += 1
         if resp.status_code not in ignore:
-            print 'Status code ({0}) at {1}'.format(
-                resp.status_code, path)
-            print '\tBody snippet:\n{0}'.format(resp.text[:500])
+            write('Status code ({0}) at {1}'.format(
+                resp.status_code, path), sub=1)
+            write('Body snippet:\n{0}'.format(resp.text[:500]), sub=2)
 
     except requests.exceptions.ConnectionError, e:
-        print 'Connection error: ', e
+        write('Connection error: {0}'.format(e), error=True)
+
+    except (KeyboardInterrupt, SystemExit):
+        write('Exiting...', raw=True)
+        return
 
 
 def path_attack(targets, wordlist=None, multidir=False, ignore=None):
+    global total
     if not wordlist:
-        print 'Must include wordlist'
+        write('Must include wordlist', error=True)
         return None
 
     for target in targets:
-        print 'Beginning path attack on target {0}'.format(target)
+        write('Beginning path attack on target {0}'.format(target))
         urls = []
         for word in wordlist:
             url = '{0}{1}'.format(target, word)
             urls.append(url)
 
-        p = Pool(processes=100)
+        total = len(wordlist)
+        p = Pool(processes=100, initializer=init_worker)
         mfunc = partial(url_get, ignore=ignore)
-        p.map(mfunc, urls)
+        try:
+            p.map_async(mfunc, urls).get(9999)
+        except (KeyboardInterrupt, SystemExit):
+            write('Exiting...', raw=True)
 
 
 def header_attack(targets, wordlist=None):
@@ -124,7 +180,7 @@ def main(args):
                                      max_length=max_length)
 
     else:
-        print 'Must choose either wordlist or brute force mode'
+        write('Must choose either wordlist or brute force mode', error=True)
 
     if args['--multidir']:
         multidir = True
@@ -132,7 +188,7 @@ def main(args):
     if args['TARGET']:
         targets = process_targets(args['TARGET'])
     else:
-        print 'Must include a target'
+        write('Must include a target', error=True)
 
     if args['--ignore']:
         ignore = map(int, args['--ignore'])
@@ -147,11 +203,12 @@ def main(args):
         header_attack(targets, wordlist=wordlist, multidir=multidir,
                       ignore=ignore)
     else:
-        print 'Unknown command'
+        write('Unknown command', error=True)
 
 if __name__ == '__main__':
     args = docopt(__doc__, version='0.0')
+    
     try:
         main(args)
-    except KeyboardInterrupt:
-        print 'Exiting...'
+    except (KeyboardInterrupt,SystemExit):
+        write('\nExiting...', raw=True)

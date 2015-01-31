@@ -1,5 +1,8 @@
 # Kamikaze
 
+## Description
+Search for 'hidden' directories with wordlists or brute force.
+
 ## Usage
 
 
