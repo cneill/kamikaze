@@ -6,9 +6,9 @@ Usage:
     kamikaze.py brute (path|headers) [--charset=STRING] [--min_len=INT] [--max_len=INT] [--multidir] [--ignore=STATUS_CODE]... TARGET ...
 
 Options:
-    list                     Attack with a wordlist
-    brute                    Attack by generating permutations of all characters in the range
-        --charset=STRING     A string of characters to use in the attack [default: abcdefghijklmnopqrstuvwxyz]
+    list                     Search with a wordlist
+    brute                    Search by generating permutations of all characters in the range
+        --charset=STRING     A string of characters to use in the search [default: abcdefghijklmnopqrstuvwxyz]
         --min_len=INT        Specify the maximum length of a generated word [default: 6]
         --max_len=INT        Specify the minimum length of a generated word [default: 1]
     path                     Send strings to the URL
@@ -62,7 +62,7 @@ def write(string, complete=False, sub=0, sep=False, raw=False,
 
 
 def read_wordlist(wordlist):
-    write('Reading attack wordlist...')
+    write('Reading search wordlist...')
     contents = []
     if os.path.isfile(wordlist):
         with open(wordlist, 'r') as f:
@@ -75,7 +75,7 @@ def read_wordlist(wordlist):
 
 def generate_wordlist(charset=string.ascii_lowercase, min_length=1,
                       max_length=6):
-    write('Generating attack wordlist...')
+    write('Generating search wordlist...')
     if type(charset) is not str:
         write('Invalid charset', error=True)
 
@@ -108,7 +108,7 @@ def url_get(url, ignore=[]):
     status = " [-] Processed {0}/{1} requests [{2:.2%}]".format(counter.value,
                                                                 total,
                                                                 progress)
-    status += (chr(8) * (len(status) + 1))
+    status += (chr(8) * (len(status) * 3))
 
     write(status, raw=True, sub=True)
 
@@ -127,32 +127,42 @@ def url_get(url, ignore=[]):
 
     except (KeyboardInterrupt, SystemExit):
         write('Exiting...', raw=True)
-        return
+        sys.exit()
 
 
-def path_attack(targets, wordlist=None, multidir=False, ignore=None):
+def path_search(targets, wordlist=None, multidir=False, ignore=None):
     global total
     if not wordlist:
         write('Must include wordlist', error=True)
         return None
 
     for target in targets:
-        write('Beginning path attack on target {0}'.format(target))
+        write('Beginning path search on target {0}'.format(target))
         urls = []
         for word in wordlist:
             url = '{0}{1}'.format(target, word)
             urls.append(url)
 
-        total = len(wordlist)
-        p = Pool(processes=100, initializer=init_worker)
+        if multidir:
+            for word in wordlist:
+                for word2 in wordlist:
+                    url = '{0}{1}/{2}'.format(target, word, word2)
+                    urls.append(url)
+
+        total = len(urls)
+        p = Pool(processes=200, initializer=init_worker)
         mfunc = partial(url_get, ignore=ignore)
         try:
             p.map_async(mfunc, urls).get(9999)
         except (KeyboardInterrupt, SystemExit):
             write('Exiting...', raw=True)
+            sys.exit()
+
+    write('\n', raw=True)
+    write('Search complete!', complete=True)
 
 
-def header_attack(targets, wordlist=None):
+def header_search(targets, wordlist=None):
     print 'ha'
 
 
@@ -197,18 +207,19 @@ def main(args):
         kwds = {'wordlist': wordlist,
                 'multidir': multidir,
                 'ignore': ignore}
-        path_attack(targets, **kwds)
+        path_search(targets, **kwds)
 
     elif args['headers']:
-        header_attack(targets, wordlist=wordlist, multidir=multidir,
+        header_search(targets, wordlist=wordlist, multidir=multidir,
                       ignore=ignore)
     else:
         write('Unknown command', error=True)
 
 if __name__ == '__main__':
     args = docopt(__doc__, version='0.0')
-    
+
     try:
         main(args)
-    except (KeyboardInterrupt,SystemExit):
+    except (KeyboardInterrupt, SystemExit):
         write('\nExiting...', raw=True)
+        sys.exit()
